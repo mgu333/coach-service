@@ -3,25 +3,23 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
-
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - name: Install Railway CLI
         run: curl -fsSL https://railway.app/install.sh | sh
-
       - name: Auth Railway (browserless)
         run: ~/.railway/bin/railway login --browserless --token "${{ secrets.RAILWAY_TOKEN }}"
-
       - name: Set Railway variables
         run: |
           ~/.railway/bin/railway variables set \
             OPENAI_API_KEY="${{ secrets.OPENAI_API_KEY }}" \
             COACH_WEBHOOK_SECRET="${{ secrets.COACH_WEBHOOK_SECRET }}" \
             TZ="${{ secrets.TZ }}"
-
       - name: Deploy
         run: ~/.railway/bin/railway up --detach
