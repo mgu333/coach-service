@@ -1,0 +1,20 @@
+name: Healthcheck
+on:
+  schedule:
+    - cron: '0 * * * *'  # hourly
+  workflow_dispatch:
+
+jobs:
+  health:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run healthcheck
+        env:
+          PUBLIC_URL: ${{ secrets.RAILWAY_PUBLIC_URL }}
+        run: |
+          if [ -z "$PUBLIC_URL" ]; then
+            echo "PUBLIC_URL not set, skipping."
+            exit 78
+          fi
+          echo "Checking $PUBLIC_URL/status"
+          curl -sSf "$PUBLIC_URL/status" || (echo "Healthcheck failed" && exit 1)
