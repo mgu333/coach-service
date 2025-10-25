@@ -11,6 +11,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+      - name: Run basic Python validation
+        run: |
+          python -m py_compile $(find . -name '*.py' | head -n 10)
+          echo "Basic Python validation passed"
       - name: Install Railway CLI
         run: curl -fsSL https://railway.app/install.sh | sh
       - name: Auth Railway (browserless)
