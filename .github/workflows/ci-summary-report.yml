@@ -1,0 +1,179 @@
+name: CI Summary and Diagnostics Report
+
+on:
+  schedule:
+    # Run every morning at 7am UTC (adjust timezone as needed)
+    - cron: '0 7 * * *'
+  workflow_dispatch: # Allow manual triggering
+
+jobs:
+  generate-ci-summary:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      actions: read
+      contents: read
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Scan for CI/Deploy issues and workflow failures
+        id: scan
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            
+            // Get open issues with CI/deploy labels
+            const { data: issues } = await github.rest.issues.listForRepo({
+              owner,
+              repo,
+              state: 'open',
+              labels: 'ci,deploy,deployment,build',
+              sort: 'updated',
+              direction: 'desc'
+            });
+            
+            // Get recent workflow runs
+            const { data: workflows } = await github.rest.actions.listRepoWorkflows({
+              owner,
+              repo
+            });
+            
+            let failedJobs = [];
+            for (const workflow of workflows.workflows) {
+              const { data: runs } = await github.rest.actions.listWorkflowRuns({
+                owner,
+                repo,
+                workflow_id: workflow.id,
+                status: 'failure',
+                per_page: 5
+              });
+              
+              for (const run of runs.workflow_runs) {
+                const { data: jobs } = await github.rest.actions.listJobsForWorkflowRun({
+                  owner,
+                  repo,
+                  run_id: run.id
+                });
+                
+                failedJobs.push(...jobs.jobs.filter(j => j.conclusion === 'failure').map(j => ({
+                  workflow: workflow.name,
+                  job: j.name,
+                  run_url: run.html_url,
+                  log_url: j.html_url,
+                  created_at: run.created_at
+                })));
+              }
+            }
+            
+            // Build summary report
+            let summary = '# 🔍 Daily CI/Deploy Summary\n\n';
+            summary += `**Generated:** ${new Date().toISOString()}\n\n`;
+            
+            // Open issues section
+            summary += '## 📋 Open CI/Deploy Issues\n\n';
+            if (issues.length === 0) {
+              summary += '✅ No open CI/deploy issues found.\n\n';
+            } else {
+              summary += `Found ${issues.length} open issue(s):\n\n`;
+              for (const issue of issues) {
+                summary += `- [#${issue.number}](${issue.html_url}) - ${issue.title}\n`;
+                summary += `  - Labels: ${issue.labels.map(l => l.name).join(', ')}\n`;
+                summary += `  - Updated: ${issue.updated_at}\n`;
+              }
+              summary += '\n';
+            }
+            
+            // Failed jobs section
+            summary += '## ❌ Recent Failed Workflow Jobs\n\n';
+            if (failedJobs.length === 0) {
+              summary += '✅ No failed workflow runs in the last 5 executions per workflow.\n\n';
+            } else {
+              summary += `Found ${failedJobs.length} failed job(s):\n\n`;
+              for (const job of failedJobs.slice(0, 10)) {
+                summary += `- **${job.workflow}** - ${job.job}\n`;
+                summary += `  - [View Run](${job.run_url}) | [View Logs](${job.log_url})\n`;
+                summary += `  - Failed at: ${job.created_at}\n`;
+              }
+              summary += '\n';
+            }
+            
+            // Checklist section
+            summary += '## ✅ Unresolved Blockers Checklist\n\n';
+            if (issues.length === 0 && failedJobs.length === 0) {
+              summary += '🎉 No blockers detected! All systems operational.\n\n';
+            } else {
+              summary += 'Review and resolve the following:\n\n';
+              if (issues.length > 0) {
+                summary += '### Issues to Address:\n';
+                for (const issue of issues) {
+                  summary += `- [ ] Review and resolve [#${issue.number}](${issue.html_url})\n`;
+                }
+                summary += '\n';
+              }
+              if (failedJobs.length > 0) {
+                summary += '### Failed Jobs to Investigate:\n';
+                const uniqueWorkflows = [...new Set(failedJobs.map(j => j.workflow))];
+                for (const workflow of uniqueWorkflows) {
+                  summary += `- [ ] Investigate failures in **${workflow}**\n`;
+                }
+                summary += '\n';
+              }
+            }
+            
+            summary += '---\n';
+            summary += '*This report was automatically generated by the CI Summary workflow.*';
+            
+            core.setOutput('summary', summary);
+            core.setOutput('has_issues', (issues.length > 0 || failedJobs.length > 0).toString());
+            return summary;
+
+      - name: Find or create tracking issue
+        id: find_issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const summary = `${{ steps.scan.outputs.summary }}`;
+            
+            // Search for existing CI summary issue
+            const { data: issues } = await github.rest.issues.listForRepo({
+              owner,
+              repo,
+              state: 'open',
+              labels: 'automated-report,ci-summary',
+              sort: 'created',
+              direction: 'desc',
+              per_page: 1
+            });
+            
+            if (issues.length > 0) {
+              // Comment on existing issue
+              const issue = issues[0];
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: issue.number,
+                body: summary
+              });
+              console.log(`Added comment to existing issue #${issue.number}`);
+            } else {
+              // Create new issue
+              const { data: newIssue } = await github.rest.issues.create({
+                owner,
+                repo,
+                title: `CI/Deploy Summary - ${new Date().toISOString().split('T')[0]}`,
+                body: summary,
+                labels: ['automated-report', 'ci-summary']
+              });
+              console.log(`Created new issue #${newIssue.number}`);
+            }
+
+      - name: Report completion
+        run: |
+          echo "✅ CI Summary report generated and posted successfully"
+          echo "Summary: ${{ steps.scan.outputs.has_issues }}"
