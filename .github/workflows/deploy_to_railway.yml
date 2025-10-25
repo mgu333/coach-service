@@ -3,11 +3,9 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
-
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
-
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -47,3 +45,11 @@ jobs:
         run: |
           echo "Deploy failed, attempting automatic rollback..."
           ~/.railway/bin/railway rollback
+      
+      # Create GitHub issue on deployment failure
+      - name: Create issue on deploy failure
+        if: failure()
+        uses: peter-evans/create-issue-from-file@v4
+        with:
+          title: Deploy Failure - ${{ github.run_number }}
+          content-filepath: .github/ISSUE_TEMPLATE/deploy_failure.md
