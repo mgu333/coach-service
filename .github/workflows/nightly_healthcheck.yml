@@ -1,0 +1,146 @@
+name: Nightly Healthcheck
+
+on:
+  schedule:
+    # Run at midnight UTC every night
+    - cron: '0 0 * * *'
+  workflow_dispatch: # Allow manual triggering
+
+jobs:
+  healthcheck:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Ping Railway deployment endpoint
+        id: healthcheck
+        run: |
+          RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" ${{ secrets.RAILWAY_ENDPOINT_URL }} || echo "000")
+          echo "status_code=$RESPONSE" >> $GITHUB_OUTPUT
+          if [ "$RESPONSE" -ge 200 ] && [ "$RESPONSE" -lt 300 ]; then
+            echo "✅ Healthcheck passed with status code: $RESPONSE"
+            exit 0
+          else
+            echo "❌ Healthcheck failed with status code: $RESPONSE"
+            exit 1
+          fi
+      
+      - name: Create GitHub issue on failure
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const statusCode = '${{ steps.healthcheck.outputs.status_code }}';
+            const issue = await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `🚨 Nightly Healthcheck Failed - ${new Date().toISOString().split('T')[0]}`,
+              body: `## Healthcheck Failure Report\n\n**Date:** ${new Date().toISOString()}\n**Status Code:** ${statusCode}\n**Endpoint:** ${{ secrets.RAILWAY_ENDPOINT_URL }}\n\n### Details\nThe nightly healthcheck workflow detected that the Railway deployment is not responding correctly.\n\n### Action Required\nPlease investigate the deployment status and logs.\n\n**Workflow Run:** ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`,
+              labels: ['bug', 'healthcheck', 'critical']
+            });
+            console.log(`Created issue #${issue.data.number}`);
+      
+      - name: Send Slack notification on failure
+        if: failure()
+        run: |
+          # Sample Slack notification using webhook
+          # To enable: Set SLACK_WEBHOOK_URL secret in repository settings
+          if [ -n "${{ secrets.SLACK_WEBHOOK_URL }}" ]; then
+            curl -X POST ${{ secrets.SLACK_WEBHOOK_URL }} \
+              -H 'Content-Type: application/json' \
+              -d '{
+                "text": "🚨 Nightly Healthcheck Failed",
+                "blocks": [
+                  {
+                    "type": "header",
+                    "text": {
+                      "type": "plain_text",
+                      "text": "🚨 Healthcheck Alert"
+                    }
+                  },
+                  {
+                    "type": "section",
+                    "fields": [
+                      {
+                        "type": "mrkdwn",
+                        "text": "*Status:*\nFailed"
+                      },
+                      {
+                        "type": "mrkdwn",
+                        "text": "*Status Code:*\n${{ steps.healthcheck.outputs.status_code }}"
+                      },
+                      {
+                        "type": "mrkdwn",
+                        "text": "*Repository:*\n${{ github.repository }}"
+                      },
+                      {
+                        "type": "mrkdwn",
+                        "text": "*Time:*\n'$(date -u +"%Y-%m-%d %H:%M:%S UTC")'"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "actions",
+                    "elements": [
+                      {
+                        "type": "button",
+                        "text": {
+                          "type": "plain_text",
+                          "text": "View Workflow Run"
+                        },
+                        "url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                      }
+                    ]
+                  }
+                ]
+              }'
+            echo "Slack notification sent"
+          else
+            echo "⚠️  SLACK_WEBHOOK_URL secret not set. Skipping Slack notification."
+            echo "To enable Slack notifications, add SLACK_WEBHOOK_URL to repository secrets."
+          fi
+      
+      - name: Send email notification on failure
+        if: failure()
+        uses: dawidd6/action-send-mail@v3
+        with:
+          # To enable: Configure these secrets in repository settings
+          server_address: ${{ secrets.MAIL_SERVER || 'smtp.gmail.com' }}
+          server_port: ${{ secrets.MAIL_PORT || '587' }}
+          username: ${{ secrets.MAIL_USERNAME }}
+          password: ${{ secrets.MAIL_PASSWORD }}
+          subject: '🚨 Nightly Healthcheck Failed - ${{ github.repository }}'
+          to: ${{ secrets.ALERT_EMAIL }}
+          from: 'GitHub Actions <noreply@github.com>'
+          body: |
+            Healthcheck Failure Report
+            
+            Repository: ${{ github.repository }}
+            Date: ${{ github.event.head_commit.timestamp }}
+            Status Code: ${{ steps.healthcheck.outputs.status_code }}
+            Endpoint: ${{ secrets.RAILWAY_ENDPOINT_URL }}
+            
+            The nightly healthcheck workflow detected that the Railway deployment is not responding correctly.
+            
+            Please investigate the deployment status and logs.
+            
+            Workflow Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          ignore_cert: true
+          convert_markdown: true
+        continue-on-error: true
+      
+      - name: Log notification status
+        if: failure()
+        run: |
+          echo "📧 Email notification: Attempted (requires MAIL_USERNAME, MAIL_PASSWORD, ALERT_EMAIL secrets)"
+          echo "💬 Slack notification: Attempted (requires SLACK_WEBHOOK_URL secret)"
+          echo "🐛 GitHub issue: Created automatically"
+          echo ""
+          echo "To enable notifications, configure the following repository secrets:"
+          echo "  - RAILWAY_ENDPOINT_URL: Your Railway deployment URL"
+          echo "  - SLACK_WEBHOOK_URL: Slack incoming webhook URL (optional)"
+          echo "  - MAIL_USERNAME: SMTP username (optional)"
+          echo "  - MAIL_PASSWORD: SMTP password (optional)"
+          echo "  - ALERT_EMAIL: Email address for alerts (optional)"
