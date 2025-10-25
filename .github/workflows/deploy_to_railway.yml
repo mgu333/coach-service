@@ -3,53 +3,19 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    env:
+      RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      COACH_WEBHOOK_SECRET: ${{ secrets.COACH_WEBHOOK_SECRET }}
+      TZ: ${{ secrets.TZ }}
     steps:
       - uses: actions/checkout@v4
-      
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.x'
-      
-      - name: Run basic Python validation
-        run: |
-          python -m py_compile $(find . -name '*.py' | head -n 10)
-          echo "Basic Python validation passed"
-      
       - name: Install Railway CLI
         run: curl -fsSL https://railway.app/install.sh | sh
-      
-      - name: Auth Railway (browserless)
-        run: ~/.railway/bin/railway login --browserless --token "${{ secrets.RAILWAY_TOKEN }}"
-      
       - name: Set Railway variables
-        run: |
-          ~/.railway/bin/railway variables set \
-            OPENAI_API_KEY="${{ secrets.OPENAI_API_KEY }}" \
-            COACH_WEBHOOK_SECRET="${{ secrets.COACH_WEBHOOK_SECRET }}" \
-            TZ="${{ secrets.TZ }}"
-      
+        run: railway variables set OPENAI_API_KEY="$OPENAI_API_KEY" COACH_WEBHOOK_SECRET="$COACH_WEBHOOK_SECRET" TZ="$TZ"
       - name: Deploy
-        id: deploy
-        run: ~/.railway/bin/railway up --detach
-      
-      # Experimental self-healing step: auto-rollback on failure
-      - name: Rollback on deploy failure
-        if: failure() && steps.deploy.conclusion == 'failure'
-        run: |
-          echo "Deploy failed, attempting automatic rollback..."
-          ~/.railway/bin/railway rollback
-      
-      # Create GitHub issue on deployment failure
-      - name: Create issue on deploy failure
-        if: failure()
-        uses: peter-evans/create-issue-from-file@v4
-        with:
-          title: Deploy Failure - ${{ github.run_number }}
-          content-filepath: .github/ISSUE_TEMPLATE/deploy_failure.md
+        run: railway up --detach
