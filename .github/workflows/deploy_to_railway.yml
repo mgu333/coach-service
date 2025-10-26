@@ -17,4 +17,4 @@ jobs:
       - name: Install Railway CLI
         run: curl -fsSL https://railway.app/install.sh | sh
       - name: Deploy to Railway
-        run: railway up --project $RAILWAY_PROJECT_ID --detach
+        run: railway up --detach
