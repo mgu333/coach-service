@@ -15,7 +15,5 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install Railway CLI
         run: curl -fsSL https://railway.app/install.sh | sh
-      - name: Set Railway variables
-        run: railway variables set OPENAI_API_KEY="$OPENAI_API_KEY" COACH_WEBHOOK_SECRET="$COACH_WEBHOOK_SECRET" TZ="$TZ"
       - name: Deploy
         run: railway up --detach
