@@ -19,4 +19,4 @@ jobs:
       - name: Link Railway project
         run: railway link $RAILWAY_PROJECT_ID
       - name: Deploy to Railway
-        run: railway up --detach
+        run: railway up --project $RAILWAY_PROJECT_ID --detach
